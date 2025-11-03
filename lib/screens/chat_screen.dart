@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:uuid/uuid.dart';
 import '../utils/constants.dart';
 import '../widgets/message_bubble.dart';
 import '../models/message_model.dart';
+import '../providers/message_provider.dart';
 
 class ChatScreen extends StatefulWidget {
   final String peerName;
@@ -20,7 +23,17 @@ class ChatScreen extends StatefulWidget {
 class _ChatScreenState extends State<ChatScreen> {
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
-  final List<Message> _messages = []; // Mock messages for now
+  final String _userId = 'my-user-id'; // This should come from user settings
+
+  @override
+  void initState() {
+    super.initState();
+    // Load conversation when screen opens
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Provider.of<MessageProvider>(context, listen: false)
+          .loadConversation(_userId, widget.peerId);
+    });
+  }
 
   @override
   void dispose() {
@@ -32,19 +45,21 @@ class _ChatScreenState extends State<ChatScreen> {
   void _sendMessage() {
     if (_messageController.text.trim().isEmpty) return;
 
-    setState(() {
-      // Create mock message for demonstration
-      final message = Message(
-        id: DateTime.now().millisecondsSinceEpoch.toString(),
-        content: _messageController.text,
-        senderId: 'me',
-        recipientId: widget.peerId,
-        timestamp: DateTime.now().millisecondsSinceEpoch,
-        messageType: MessageType.TEXT,
-        isDelivered: false,
-      );
-      _messages.add(message);
-    });
+    final messageProvider = Provider.of<MessageProvider>(context, listen: false);
+    
+    // Create new message
+    final message = Message(
+      id: const Uuid().v4(),
+      content: _messageController.text.trim(),
+      senderId: _userId,
+      recipientId: widget.peerId,
+      timestamp: DateTime.now().millisecondsSinceEpoch,
+      messageType: MessageType.TEXT,
+      isDelivered: false,
+    );
+
+    // Send via provider
+    messageProvider.sendMessage(message);
 
     _messageController.clear();
 
@@ -90,10 +105,18 @@ class _ChatScreenState extends State<ChatScreen> {
       ),
       body: Column(
         children: [
-          // Messages List
+          // Messages List with Provider
           Expanded(
-            child: _messages.isEmpty
-                ? Center(
+            child: Consumer<MessageProvider>(
+              builder: (context, messageProvider, child) {
+                if (messageProvider.isLoading) {
+                  return const Center(
+                    child: CircularProgressIndicator(),
+                  );
+                }
+
+                if (messageProvider.messages.isEmpty) {
+                  return Center(
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
@@ -116,20 +139,30 @@ class _ChatScreenState extends State<ChatScreen> {
                         ),
                       ],
                     ),
-                  )
-                : ListView.builder(
-                    controller: _scrollController,
-                    padding: const EdgeInsets.all(AppSizes.paddingMedium),
-                    itemCount: _messages.length,
-                    itemBuilder: (context, index) {
-                      final message = _messages[index];
-                      final isSent = message.senderId == 'me';
-                      return MessageBubble(
-                        message: message,
-                        isSent: isSent,
-                      );
-                    },
-                  ),
+                  );
+                }
+
+                // Filter messages for this conversation
+                final conversationMessages = messageProvider.messages.where((m) =>
+                  (m.senderId == _userId && m.recipientId == widget.peerId) ||
+                  (m.senderId == widget.peerId && m.recipientId == _userId)
+                ).toList();
+
+                return ListView.builder(
+                  controller: _scrollController,
+                  padding: const EdgeInsets.all(AppSizes.paddingMedium),
+                  itemCount: conversationMessages.length,
+                  itemBuilder: (context, index) {
+                    final message = conversationMessages[index];
+                    final isSent = message.senderId == _userId;
+                    return MessageBubble(
+                      message: message,
+                      isSent: isSent,
+                    );
+                  },
+                );
+              },
+            ),
           ),
 
           // Message Input

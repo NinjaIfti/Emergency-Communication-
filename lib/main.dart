@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'utils/constants.dart';
 import 'screens/splash_screen.dart';
 import 'screens/home_screen.dart';
@@ -7,6 +8,7 @@ import 'screens/sos_screen.dart';
 import 'screens/peers_screen.dart';
 import 'screens/map_screen.dart';
 import 'screens/settings_screen.dart';
+import 'providers/message_provider.dart';
 
 void main() {
   runApp(const EmergencyCommApp());
@@ -17,7 +19,11 @@ class EmergencyCommApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => MessageProvider()),
+      ],
+      child: MaterialApp(
       title: 'Emergency Comm',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
@@ -77,6 +83,7 @@ class EmergencyCommApp extends StatelessWidget {
             );
         }
       },
+      ),
     );
   }
 }

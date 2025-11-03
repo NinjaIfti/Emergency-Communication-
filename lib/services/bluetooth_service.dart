@@ -115,21 +115,93 @@ class BluetoothService {
     }
   }
 
-  // Send message to device (placeholder - will implement in Week 5)
-  Future<void> sendMessage(BluetoothDevice device, String message) async {
+  // Custom service and characteristic UUIDs
+  static const String serviceUUID = "0000ffe0-0000-1000-8000-00805f9b34fb";
+  static const String characteristicUUID = "0000ffe1-0000-1000-8000-00805f9b34fb";
+
+  BluetoothCharacteristic? _writeCharacteristic;
+  BluetoothCharacteristic? _readCharacteristic;
+
+  // Discover services and characteristics
+  Future<bool> discoverServicesAndCharacteristics(BluetoothDevice device) async {
     try {
-      // This will be implemented in Week 5 with proper service/characteristic
-      print('Sending message to ${device.name}: $message');
-      // TODO: Implement actual message sending via GATT characteristics
+      List<BluetoothService> services = await device.discoverServices();
+      
+      for (var service in services) {
+        for (var characteristic in service.characteristics) {
+          // Check for writable characteristic
+          if (characteristic.properties.write || characteristic.properties.writeWithoutResponse) {
+            _writeCharacteristic = characteristic;
+            print('Found write characteristic: ${characteristic.uuid}');
+          }
+          
+          // Check for readable/notifiable characteristic
+          if (characteristic.properties.notify || characteristic.properties.read) {
+            _readCharacteristic = characteristic;
+            print('Found read characteristic: ${characteristic.uuid}');
+          }
+        }
+      }
+
+      return _writeCharacteristic != null && _readCharacteristic != null;
     } catch (e) {
-      print('Error sending message: $e');
+      print('Error discovering services: $e');
+      return false;
     }
   }
 
-  // Listen for messages (placeholder - will implement in Week 5)
-  Stream<String> listenForMessages(BluetoothDevice device) {
-    // This will be implemented in Week 5
-    return Stream.empty();
+  // Send message to device
+  Future<bool> sendMessage(BluetoothDevice device, String message) async {
+    try {
+      // Discover services if not already done
+      if (_writeCharacteristic == null) {
+        bool discovered = await discoverServicesAndCharacteristics(device);
+        if (!discovered) {
+          print('Failed to discover characteristics');
+          return false;
+        }
+      }
+
+      // Convert message to bytes
+      final bytes = message.codeUnits;
+      
+      // Write to characteristic
+      await _writeCharacteristic!.write(bytes, withoutResponse: false);
+      print('Message sent successfully: $message');
+      
+      return true;
+    } catch (e) {
+      print('Error sending message: $e');
+      return false;
+    }
+  }
+
+  // Listen for messages from device
+  Stream<String> listenForMessages(BluetoothDevice device) async* {
+    try {
+      // Discover services if not already done
+      if (_readCharacteristic == null) {
+        bool discovered = await discoverServicesAndCharacteristics(device);
+        if (!discovered) {
+          print('Failed to discover characteristics');
+          return;
+        }
+      }
+
+      // Enable notifications
+      await _readCharacteristic!.setNotifyValue(true);
+
+      // Listen to characteristic value changes
+      await for (var value in _readCharacteristic!.lastValueStream) {
+        if (value.isNotEmpty) {
+          final message = String.fromCharCodes(value);
+          print('Message received: $message');
+          yield message;
+        }
+      }
+    } catch (e) {
+      print('Error listening for messages: $e');
+    }
   }
 
   // Dispose
