@@ -15,6 +15,17 @@ class PeerDao {
     );
   }
 
+  // Update an existing peer
+  Future<int> updatePeer(Peer peer) async {
+    final db = await _dbHelper.database;
+    return await db.update(
+      'peers',
+      peer.toMap(),
+      where: 'peer_id = ?',
+      whereArgs: [peer.peerId],
+    );
+  }
+
   // Get all peers
   Future<List<Peer>> getAllPeers() async {
     final db = await _dbHelper.database;

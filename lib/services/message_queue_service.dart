@@ -2,7 +2,7 @@ import 'dart:async';
 import '../models/message_model.dart';
 import '../database/message_dao.dart';
 import '../services/bluetooth_service.dart';
-import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:flutter_blue_plus/flutter_blue_plus.dart' as fbp;
 import 'dart:convert';
 
 class MessageQueueService {
@@ -88,7 +88,7 @@ class MessageQueueService {
   }
 
   // Send a single message to a device
-  Future<bool> _sendMessageToDevice(Message message, BluetoothDevice device) async {
+  Future<bool> _sendMessageToDevice(Message message, fbp.BluetoothDevice device) async {
     try {
       // Convert message to JSON
       final jsonMessage = jsonEncode(message.toJson());

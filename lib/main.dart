@@ -9,6 +9,7 @@ import 'screens/peers_screen.dart';
 import 'screens/map_screen.dart';
 import 'screens/settings_screen.dart';
 import 'providers/message_provider.dart';
+import 'providers/peer_provider.dart';
 
 void main() {
   runApp(const EmergencyCommApp());
@@ -22,6 +23,7 @@ class EmergencyCommApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => MessageProvider()),
+        ChangeNotifierProvider(create: (_) => PeerProvider()),
       ],
       child: MaterialApp(
       title: 'Emergency Comm',
@@ -40,7 +42,7 @@ class EmergencyCommApp extends StatelessWidget {
           titleTextStyle: AppTextStyles.heading3.copyWith(
             color: AppColors.white,
           ),
-        ),
+      ),
       ),
       initialRoute: AppRoutes.splash,
       onGenerateRoute: (settings) {

@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../utils/constants.dart';
 import '../widgets/peer_tile.dart';
-import '../models/peer_model.dart';
+import '../providers/peer_provider.dart';
 
 class PeersScreen extends StatefulWidget {
   const PeersScreen({super.key});
@@ -11,151 +12,192 @@ class PeersScreen extends StatefulWidget {
 }
 
 class _PeersScreenState extends State<PeersScreen> {
-  bool _isScanning = false;
-  final List<Peer> _peers = [];
+  @override
+  void initState() {
+    super.initState();
+    // Load existing peers when screen opens
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Provider.of<PeerProvider>(context, listen: false).loadPeers();
+    });
+  }
 
   void _startScan() {
-    setState(() {
-      _isScanning = true;
-    });
+    // Start real Bluetooth scanning using PeerProvider
+    Provider.of<PeerProvider>(context, listen: false).startScanning();
+  }
 
-    // Simulate scanning
-    Future.delayed(const Duration(seconds: 3), () {
-      if (mounted) {
-        setState(() {
-          _isScanning = false;
-          // Add mock peers for demonstration
-          if (_peers.isEmpty) {
-            _peers.addAll([
-              Peer(
-                peerId: 'peer1',
-                deviceName: 'John\'s Phone',
-                lastSeen: DateTime.now().millisecondsSinceEpoch,
-                isConnected: true,
-                connectionType: ConnectionType.BLUETOOTH,
-              ),
-              Peer(
-                peerId: 'peer2',
-                deviceName: 'Sarah\'s Device',
-                lastSeen:
-                    DateTime.now().millisecondsSinceEpoch - (2 * 60 * 1000),
-                isConnected: false,
-                connectionType: ConnectionType.WIFI,
-              ),
-            ]);
-          }
-        });
-      }
-    });
+  void _stopScan() {
+    // Stop Bluetooth scanning
+    Provider.of<PeerProvider>(context, listen: false).stopScanning();
+  }
+
+  void _connectToPeer(String peerId) async {
+    final peerProvider = Provider.of<PeerProvider>(context, listen: false);
+    bool connected = await peerProvider.connectToPeer(peerId);
+    
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(connected ? 'Connected successfully!' : 'Connection failed'),
+          backgroundColor: connected ? AppColors.success : AppColors.danger,
+        ),
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Nearby Devices'),
-        backgroundColor: AppColors.success,
-        foregroundColor: AppColors.white,
-        actions: [
-          IconButton(
-            icon: Icon(_isScanning ? Icons.stop : Icons.refresh),
-            onPressed: _isScanning ? null : _startScan,
-          ),
-        ],
-      ),
-      body: Column(
-        children: [
-          // Status Bar
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(AppSizes.paddingMedium),
-            color: AppColors.lightGrey,
-            child: Row(
-              children: [
-                Icon(
-                  _isScanning ? Icons.bluetooth_searching : Icons.bluetooth,
-                  color: AppColors.secondary,
-                ),
-                const SizedBox(width: AppSizes.paddingSmall),
-                Text(
-                  _isScanning
-                      ? 'Scanning for devices...'
-                      : '${_peers.where((p) => p.isConnected).length} connected, ${_peers.length} total',
-                  style: AppTextStyles.body,
-                ),
-              ],
-            ),
-          ),
+    return Consumer<PeerProvider>(
+      builder: (context, peerProvider, child) {
+        final peers = peerProvider.peers;
+        final connectedCount = peerProvider.connectedPeerCount;
+        final isScanning = peerProvider.isScanning;
 
-          // Peer List
-          Expanded(
-            child: _peers.isEmpty
-                ? Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.devices_outlined,
-                          size: 80,
-                          color: AppColors.grey,
-                        ),
-                        const SizedBox(height: AppSizes.paddingMedium),
-                        Text(
-                          _isScanning
-                              ? 'Searching for devices...'
-                              : 'No devices found',
-                          style: AppTextStyles.body.copyWith(
-                            color: AppColors.grey,
-                          ),
-                        ),
-                        if (!_isScanning) ...[
-                          const SizedBox(height: AppSizes.paddingSmall),
-                          Text(
-                            'Tap refresh to scan',
-                            style: AppTextStyles.caption,
-                          ),
-                        ],
-                        if (_isScanning) ...[
-                          const SizedBox(height: AppSizes.paddingMedium),
-                          CircularProgressIndicator(
-                            valueColor: AlwaysStoppedAnimation<Color>(
-                              AppColors.success,
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  )
-                : ListView.separated(
-                    padding: const EdgeInsets.all(AppSizes.paddingMedium),
-                    itemCount: _peers.length,
-                    separatorBuilder: (context, index) =>
-                        const SizedBox(height: AppSizes.paddingSmall),
-                    itemBuilder: (context, index) {
-                      final peer = _peers[index];
-                      return PeerTile(
-                        peer: peer,
-                        onTap: () {
-                          Navigator.pushNamed(
-                            context,
-                            AppRoutes.chat,
-                            arguments: {
-                              'peerName': peer.deviceName,
-                              'peerId': peer.peerId,
-                            },
-                          );
-                        },
-                      );
-                    },
-                  ),
+        return Scaffold(
+          appBar: AppBar(
+            title: const Text('Nearby Devices'),
+            backgroundColor: AppColors.success,
+            foregroundColor: AppColors.white,
+            actions: [
+              IconButton(
+                icon: Icon(isScanning ? Icons.stop : Icons.refresh),
+                onPressed: isScanning ? _stopScan : _startScan,
+                tooltip: isScanning ? 'Stop Scanning' : 'Start Scanning',
+              ),
+            ],
           ),
-        ],
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _isScanning ? null : _startScan,
-        backgroundColor: AppColors.success,
-        child: Icon(_isScanning ? Icons.hourglass_empty : Icons.search),
-      ),
+          body: Column(
+            children: [
+              // Status Bar
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(AppSizes.paddingMedium),
+                color: AppColors.lightGrey,
+                child: Row(
+                  children: [
+                    Icon(
+                      isScanning ? Icons.bluetooth_searching : Icons.bluetooth,
+                      color: AppColors.secondary,
+                    ),
+                    const SizedBox(width: AppSizes.paddingSmall),
+                    Expanded(
+                      child: Text(
+                        isScanning
+                            ? 'Scanning for devices...'
+                            : '$connectedCount connected, ${peers.length} total',
+                        style: AppTextStyles.body,
+                      ),
+                    ),
+                    if (isScanning)
+                      const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+
+              // Error Message
+              if (peerProvider.error != null)
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(AppSizes.paddingSmall),
+                  color: AppColors.danger.withOpacity(0.1),
+                  child: Row(
+                    children: [
+                      Icon(Icons.error_outline, color: AppColors.danger, size: 20),
+                      const SizedBox(width: AppSizes.paddingSmall),
+                      Expanded(
+                        child: Text(
+                          peerProvider.error!,
+                          style: AppTextStyles.caption.copyWith(
+                            color: AppColors.danger,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close, size: 20),
+                        onPressed: () => peerProvider.clearError(),
+                      ),
+                    ],
+                  ),
+                ),
+
+              // Peer List
+              Expanded(
+                child: peerProvider.isLoading
+                    ? const Center(child: CircularProgressIndicator())
+                    : peers.isEmpty
+                        ? Center(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(
+                                  Icons.devices_outlined,
+                                  size: 80,
+                                  color: AppColors.grey,
+                                ),
+                                const SizedBox(height: AppSizes.paddingMedium),
+                                Text(
+                                  isScanning
+                                      ? 'Searching for devices...'
+                                      : 'No devices found',
+                                  style: AppTextStyles.body.copyWith(
+                                    color: AppColors.grey,
+                                  ),
+                                ),
+                                if (!isScanning) ...[
+                                  const SizedBox(height: AppSizes.paddingSmall),
+                                  Text(
+                                    'Tap the scan button to find nearby devices',
+                                    style: AppTextStyles.caption,
+                                    textAlign: TextAlign.center,
+                                  ),
+                                ],
+                              ],
+                            ),
+                          )
+                        : ListView.separated(
+                            padding: const EdgeInsets.all(AppSizes.paddingMedium),
+                            itemCount: peers.length,
+                            separatorBuilder: (context, index) =>
+                                const SizedBox(height: AppSizes.paddingSmall),
+                            itemBuilder: (context, index) {
+                              final peer = peers[index];
+                              return PeerTile(
+                                peer: peer,
+                                onTap: () {
+                                  // Connect if not connected, otherwise navigate to chat
+                                  if (peer.isConnected) {
+                                    Navigator.pushNamed(
+                                      context,
+                                      AppRoutes.chat,
+                                      arguments: {
+                                        'peerName': peer.deviceName,
+                                        'peerId': peer.peerId,
+                                      },
+                                    );
+                                  } else {
+                                    _connectToPeer(peer.peerId);
+                                  }
+                                },
+                              );
+                            },
+                          ),
+              ),
+            ],
+          ),
+          floatingActionButton: FloatingActionButton.extended(
+            onPressed: isScanning ? _stopScan : _startScan,
+            backgroundColor: AppColors.success,
+            icon: Icon(isScanning ? Icons.stop : Icons.search),
+            label: Text(isScanning ? 'Stop' : 'Scan'),
+          ),
+        );
+      },
     );
   }
 }

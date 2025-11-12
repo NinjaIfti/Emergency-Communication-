@@ -3,29 +3,40 @@ import '../models/message_model.dart';
 import '../database/message_dao.dart';
 import '../services/bluetooth_service.dart';
 import '../services/message_queue_service.dart';
+import '../services/mesh_network_service.dart';
+import '../services/message_routing_service.dart';
 import 'dart:async';
 import 'dart:convert';
-import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:flutter_blue_plus/flutter_blue_plus.dart' as fbp;
 
 class MessageProvider extends ChangeNotifier {
   final MessageDao _messageDao = MessageDao();
   final BluetoothService _bluetoothService = BluetoothService.instance;
   final MessageQueueService _queueService = MessageQueueService.instance;
+  final MeshNetworkService _meshService = MeshNetworkService.instance;
+  final MessageRoutingService _routingService = MessageRoutingService.instance;
   
   List<Message> _messages = [];
   bool _isLoading = false;
   String? _error;
-  BluetoothDevice? _connectedDevice;
+  fbp.BluetoothDevice? _connectedDevice;
   StreamSubscription<String>? _messageListener;
+  String _myDeviceId = 'device-${DateTime.now().millisecondsSinceEpoch}';
 
   // Getters
   List<Message> get messages => _messages;
   bool get isLoading => _isLoading;
   String? get error => _error;
-  BluetoothDevice? get connectedDevice => _connectedDevice;
+  fbp.BluetoothDevice? get connectedDevice => _connectedDevice;
+  String get myDeviceId => _myDeviceId;
+
+  // Initialize mesh service with device ID
+  MessageProvider() {
+    _meshService.setMyDeviceId(_myDeviceId);
+  }
 
   // Set connected device for messaging
-  void setConnectedDevice(BluetoothDevice? device) {
+  void setConnectedDevice(fbp.BluetoothDevice? device) {
     _connectedDevice = device;
     
     // Start listening for messages if device is connected
@@ -42,7 +53,7 @@ class MessageProvider extends ChangeNotifier {
   }
 
   // Start listening for incoming messages
-  void startListeningForMessages(BluetoothDevice device) {
+  void startListeningForMessages(fbp.BluetoothDevice device) {
     // Cancel previous listener if exists
     stopListeningForMessages();
 
@@ -76,10 +87,21 @@ class MessageProvider extends ChangeNotifier {
       final jsonData = jsonDecode(messageString);
       final message = Message.fromJson(jsonData);
       
-      // Process the received message
-      await receiveMessage(message);
+      // Check if message should be forwarded (duplicate detection)
+      if (!_routingService.shouldForwardMessage(message)) {
+        print('Message is duplicate or TTL exceeded: ${message.id}');
+        return;
+      }
       
-      print('Message parsed and stored: ${message.id}');
+      // Process the received message with mesh network service
+      await _meshService.processReceivedMessage(message);
+      
+      // If message is for this device, add to local messages
+      if (message.recipientId == _myDeviceId || message.recipientId == 'broadcast') {
+        await receiveMessage(message);
+      }
+      
+      print('Message parsed and processed: ${message.id}');
     } catch (e) {
       print('Error parsing incoming message: $e');
       _error = 'Failed to parse message: $e';
@@ -126,34 +148,18 @@ class MessageProvider extends ChangeNotifier {
   // Send a message
   Future<bool> sendMessage(Message message) async {
     try {
-      // Insert into database
-      await _messageDao.insertMessage(message);
-      
       // Add to local list
       _messages.add(message);
       notifyListeners();
 
-      // Send via Bluetooth if device is connected
-      if (_connectedDevice != null) {
-        // Convert message to JSON
-        final jsonMessage = jsonEncode(message.toJson());
-        
-        // Send via Bluetooth
-        bool sent = await _bluetoothService.sendMessage(
-          _connectedDevice!,
-          jsonMessage,
-        );
-        
-        if (sent) {
-          print('Message sent via Bluetooth: ${message.id}');
-          // Update status to sent (will be marked delivered when ACK received)
-          return true;
-        } else {
-          print('Failed to send via Bluetooth, queued for retry');
-          return false;
-        }
+      // Send via mesh network service (handles routing, forwarding, and broadcasting)
+      bool sent = await _meshService.sendMessage(message);
+      
+      if (sent) {
+        print('Message sent via mesh network: ${message.id}');
+        return true;
       } else {
-        print('No device connected, message queued: ${message.id}');
+        print('Failed to send via mesh network, queued for retry');
         return false;
       }
     } catch (e) {
