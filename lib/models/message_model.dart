@@ -65,6 +65,8 @@ class Message {
       'is_delivered': isDelivered ? 1 : 0,
       'hop_count': hopCount,
       'message_type': messageType.toString().split('.').last,
+      'latitude': latitude,
+      'longitude': longitude,
     };
   }
 
@@ -77,8 +79,10 @@ class Message {
       recipientId: map['recipient_id'],
       timestamp: map['timestamp'],
       isDelivered: map['is_delivered'] == 1,
-      hopCount: map['hop_count'],
+      hopCount: map['hop_count'] ?? 0,
       messageType: _messageTypeFromString(map['message_type']),
+      latitude: map['latitude']?.toDouble(),
+      longitude: map['longitude']?.toDouble(),
     );
   }
 

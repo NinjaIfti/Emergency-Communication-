@@ -62,6 +62,25 @@ class BluetoothService {
   // Start scanning for nearby devices
   Future<void> startScan({Duration timeout = const Duration(seconds: 10)}) async {
     try {
+      // Check if Bluetooth is enabled first
+      final isEnabled = await isBluetoothEnabled();
+      if (!isEnabled) {
+        // Try to turn on Bluetooth
+        print('Bluetooth is off. Attempting to turn on...');
+        try {
+          await turnOnBluetooth();
+          // Wait a moment for Bluetooth to turn on
+          await Future.delayed(const Duration(seconds: 1));
+          // Check again
+          final isStillDisabled = !(await isBluetoothEnabled());
+          if (isStillDisabled) {
+            throw Exception('Bluetooth must be turned on. Please enable Bluetooth in your device settings.');
+          }
+        } catch (e) {
+          throw Exception('Bluetooth must be turned on. Please enable Bluetooth in your device settings. Error: $e');
+        }
+      }
+
       _discoveredDevices.clear();
 
       // Start scanning
@@ -81,6 +100,7 @@ class BluetoothService {
       });
     } catch (e) {
       print('Error starting Bluetooth scan: $e');
+      rethrow; // Re-throw so PeerProvider can handle the error
     }
   }
 

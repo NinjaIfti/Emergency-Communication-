@@ -11,6 +11,7 @@ class AppColors {
   static const Color lightGrey = Color(0xFFE0E0E0);
   static const Color success = Color(0xFF4CAF50);
   static const Color warning = Color(0xFFFFA726);
+  static const Color danger = Color(0xFFE53935); // Error/alert red
 }
 
 // Text Styles

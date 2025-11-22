@@ -166,7 +166,7 @@ class PeerProvider extends ChangeNotifier {
       _error = null;
       notifyListeners();
 
-      // Start Bluetooth scan
+      // Start Bluetooth scan (will check if Bluetooth is enabled)
       await _bluetoothService.startScan();
 
       // Listen to discovered devices stream
@@ -176,7 +176,16 @@ class PeerProvider extends ChangeNotifier {
         },
         onError: (error) {
           print('Error in device stream: $error');
-          _error = 'Scan error: $error';
+          // Extract user-friendly error message
+          String errorMsg = error.toString();
+          if (errorMsg.contains('Bluetooth must be turned on')) {
+            errorMsg = 'Bluetooth must be turned on. Please enable Bluetooth in your device settings.';
+          } else if (errorMsg.contains('Permission')) {
+            errorMsg = 'Bluetooth permission denied. Please grant Bluetooth permissions in app settings.';
+          } else {
+            errorMsg = 'Scan error: $error';
+          }
+          _error = errorMsg;
           _isScanning = false;
           notifyListeners();
         },
@@ -184,7 +193,16 @@ class PeerProvider extends ChangeNotifier {
 
       print('Started scanning for peers');
     } catch (e) {
-      _error = 'Failed to start scanning: $e';
+      // Extract user-friendly error message
+      String errorMsg = e.toString();
+      if (errorMsg.contains('Bluetooth must be turned on')) {
+        errorMsg = 'Bluetooth must be turned on. Please enable Bluetooth in your device settings.';
+      } else if (errorMsg.contains('Permission')) {
+        errorMsg = 'Bluetooth permission denied. Please grant Bluetooth permissions in app settings.';
+      } else {
+        errorMsg = 'Failed to start scanning: $e';
+      }
+      _error = errorMsg;
       _isScanning = false;
       notifyListeners();
     }
@@ -207,11 +225,52 @@ class PeerProvider extends ChangeNotifier {
     }
   }
 
+  // Get device name with better fallback
+  String _getDeviceName(fbp.BluetoothDevice device) {
+    // Try regular device name first
+    if (device.name.isNotEmpty && 
+        device.name != '(unknown)' && 
+        device.name.toLowerCase() != 'unknown') {
+      return device.name;
+    }
+    
+    // Try platform name if available (might need connection first)
+    try {
+      // Note: platformName might require connection, but we try anyway
+      final platformName = device.platformName;
+      if (platformName.isNotEmpty && 
+          platformName != '(unknown)' && 
+          platformName.toLowerCase() != 'unknown') {
+        return platformName;
+      }
+    } catch (e) {
+      // platformName might not be available or throw error
+      // This is expected if device is not connected
+    }
+    
+    // Fallback: Use MAC address with better format
+    final deviceId = device.id.toString();
+    // MAC addresses are typically in format "XX:XX:XX:XX:XX:XX"
+    // Extract last 5 characters (last 2 octets like ":XX:XX")
+    String shortId = deviceId;
+    if (deviceId.contains(':')) {
+      final parts = deviceId.split(':');
+      if (parts.length >= 2) {
+        // Take last 2 octets: "XX:XX" (uppercase)
+        shortId = '${parts[parts.length - 2].toUpperCase()}:${parts[parts.length - 1].toUpperCase()}';
+      }
+    } else if (deviceId.length > 4) {
+      // If no colons, take last 4 characters
+      shortId = deviceId.substring(deviceId.length - 4).toUpperCase();
+    }
+    return 'Device $shortId';
+  }
+
   // Handle discovered devices
   Future<void> _handleDiscoveredDevices(List<fbp.BluetoothDevice> devices) async {
     for (var device in devices) {
       final peerId = device.id.toString();
-      final deviceName = device.name.isNotEmpty ? device.name : 'Unknown Device';
+      final deviceName = _getDeviceName(device);
 
       // Check if peer already exists
       final existingIndex = _peers.indexWhere((p) => p.peerId == peerId);
@@ -228,9 +287,16 @@ class PeerProvider extends ChangeNotifier {
 
         await addPeer(newPeer);
       } else {
-        // Update last seen time
-        final updatedPeer = _peers[existingIndex].copyWith(
+        // Update last seen time and potentially update name if we now have it
+        final updatedName = _getDeviceName(device);
+        final currentPeer = _peers[existingIndex];
+        final updatedPeer = currentPeer.copyWith(
           lastSeen: DateTime.now().millisecondsSinceEpoch,
+          // Update name if we got a better name (not the fallback format)
+          deviceName: (updatedName != 'Unknown Device' && 
+                      !updatedName.startsWith('Device ')) 
+                      ? updatedName 
+                      : currentPeer.deviceName,
         );
         await updatePeer(updatedPeer);
       }
@@ -279,13 +345,64 @@ class PeerProvider extends ChangeNotifier {
       bool connected = await _bluetoothService.connectToDevice(targetDevice);
 
       if (connected) {
-        await updatePeerStatus(peerId, true);
-        print('Connected to peer: ${_peers[peerIndex].deviceName}');
+        // After connection, try to discover services to verify compatibility
+        bool hasRequiredServices = false;
+        try {
+          hasRequiredServices = await _bluetoothService.discoverServicesAndCharacteristics(targetDevice);
+        } catch (e) {
+          print('Error discovering services: $e');
+          // If service discovery fails, disconnect
+          try {
+            await _bluetoothService.disconnectDevice(targetDevice);
+          } catch (disconnectError) {
+            print('Error disconnecting: $disconnectError');
+          }
+        }
+        
+        if (!hasRequiredServices) {
+          // Device doesn't have required services, disconnect
+          try {
+            await _bluetoothService.disconnectDevice(targetDevice);
+          } catch (disconnectError) {
+            print('Error disconnecting: $disconnectError');
+          }
+          _error = 'Device does not support required services. Only devices running this app can connect.';
+          notifyListeners();
+          return false;
+        }
+        
+        // Try to get better device name after connection
+        final betterName = _getDeviceName(targetDevice);
+        final currentPeer = _peers[peerIndex];
+        
+        // Update peer with connection status and better name if available
+        final updatedPeer = currentPeer.copyWith(
+          isConnected: true,
+          lastSeen: DateTime.now().millisecondsSinceEpoch,
+          // Update name if we got a better name (not the fallback format)
+          deviceName: (betterName != 'Unknown Device' && 
+                      !betterName.startsWith('Device ')) 
+                      ? betterName 
+                      : currentPeer.deviceName,
+        );
+        
+        await updatePeer(updatedPeer);
+        print('Connected to peer: ${updatedPeer.deviceName}');
       }
 
       return connected;
     } catch (e) {
-      _error = 'Failed to connect to peer: $e';
+      // Provide user-friendly error messages
+      String errorMsg = e.toString();
+      if (errorMsg.contains('timeout') || errorMsg.contains('Timed out')) {
+        _error = 'Connection timeout. The device may not be available or does not support the required services.';
+      } else if (errorMsg.contains('133') || errorMsg.contains('ANDROID_SPECIFIC_ERROR')) {
+        _error = 'Connection failed. The device may not be compatible or may be in use by another app.';
+      } else if (errorMsg.contains('Connection refused') || errorMsg.contains('refused')) {
+        _error = 'Connection refused. The device may not be configured for mesh networking.';
+      } else {
+        _error = 'Connection failed: ${errorMsg.length > 50 ? errorMsg.substring(0, 50) + "..." : errorMsg}';
+      }
       notifyListeners();
       return false;
     }

@@ -33,15 +33,41 @@ class _PeersScreenState extends State<PeersScreen> {
 
   void _connectToPeer(String peerId) async {
     final peerProvider = Provider.of<PeerProvider>(context, listen: false);
+    
+    // Show loading indicator
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Connecting...'),
+          duration: Duration(seconds: 1),
+        ),
+      );
+    }
+    
     bool connected = await peerProvider.connectToPeer(peerId);
     
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(connected ? 'Connected successfully!' : 'Connection failed'),
-          backgroundColor: connected ? AppColors.success : AppColors.danger,
-        ),
-      );
+      if (connected) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Connected successfully!'),
+            backgroundColor: AppColors.success,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      } else {
+        // Show error from provider if available, otherwise generic message
+        final errorMessage = peerProvider.error ?? 
+            'Connection failed. Only devices running this app can connect.';
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(errorMessage),
+            backgroundColor: AppColors.danger,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
     }
   }
 

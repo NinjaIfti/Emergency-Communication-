@@ -1,7 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
+import 'package:geolocator/geolocator.dart';
 import '../utils/constants.dart';
 import '../widgets/sos_button.dart';
+import '../services/location_service.dart';
+import '../providers/message_provider.dart';
+import '../models/message_model.dart';
+import 'dart:math';
+import '../utils/permissions_helper.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class SOSScreen extends StatefulWidget {
   const SOSScreen({super.key});
@@ -11,8 +19,10 @@ class SOSScreen extends StatefulWidget {
 }
 
 class _SOSScreenState extends State<SOSScreen> {
+  final LocationService _locationService = LocationService.instance;
   bool _isGettingLocation = false;
   String? _locationInfo;
+  String? _errorMessage;
 
   void _onSOSPressed() {
     // Show confirmation dialog
@@ -50,36 +60,140 @@ class _SOSScreenState extends State<SOSScreen> {
     );
   }
 
-  void _sendSOS() async {
+  Future<void> _sendSOS() async {
     // Haptic feedback
     HapticFeedback.heavyImpact();
 
     setState(() {
       _isGettingLocation = true;
+      _locationInfo = null;
+      _errorMessage = null;
     });
 
-    // Simulate getting location and sending SOS
-    await Future.delayed(const Duration(seconds: 2));
+    try {
+      // Request location permissions
+      bool hasPermission = await PermissionsHelper.requestLocationPermissions();
+      if (!hasPermission) {
+        setState(() {
+          _isGettingLocation = false;
+          _errorMessage = 'Location permission denied. Please enable location access in settings.';
+        });
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(_errorMessage!),
+              backgroundColor: AppColors.danger,
+              duration: const Duration(seconds: 3),
+            ),
+          );
+        }
+        return;
+      }
 
-    setState(() {
-      _isGettingLocation = false;
-      _locationInfo = 'SOS sent at 23.8103°N, 90.4125°E';
-    });
+      // Get current location
+      Position? position = await _locationService.getCurrentLocation();
+      
+      // Fallback to last known location if current location unavailable
+      if (position == null) {
+        position = await _locationService.getLastKnownLocation();
+        if (position == null) {
+          setState(() {
+            _isGettingLocation = false;
+            _errorMessage = 'Unable to get location. Please ensure GPS is enabled.';
+          });
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(_errorMessage!),
+                backgroundColor: AppColors.danger,
+                duration: const Duration(seconds: 3),
+              ),
+            );
+          }
+          return;
+        }
+      }
 
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Row(
-            children: [
-              Icon(Icons.check_circle, color: AppColors.white),
-              const SizedBox(width: AppSizes.paddingSmall),
-              const Text('SOS Alert sent successfully!'),
-            ],
-          ),
-          backgroundColor: AppColors.success,
-          duration: const Duration(seconds: 3),
-        ),
+      // Get username from preferences
+      final prefs = await SharedPreferences.getInstance();
+      final userName = prefs.getString('user_name') ?? 'Unknown User';
+      
+      // Get device ID from message provider
+      final messageProvider = Provider.of<MessageProvider>(context, listen: false);
+      final deviceId = messageProvider.myDeviceId;
+
+      // Format location info
+      final locationInfo = _locationService.formatPosition(position);
+      final accuracyInfo = _locationService.getAccuracyDescription(position.accuracy);
+
+      // Create SOS message
+      final sosMessage = Message(
+        id: 'sos-${DateTime.now().millisecondsSinceEpoch}-${Random().nextInt(1000)}',
+        content: '🚨 SOS ALERT: Emergency assistance needed! Location: $locationInfo',
+        senderId: deviceId,
+        recipientId: 'broadcast', // Broadcast to all devices
+        timestamp: DateTime.now().millisecondsSinceEpoch,
+        messageType: MessageType.SOS,
+        latitude: position.latitude,
+        longitude: position.longitude,
+        hopCount: 0,
+        isDelivered: false,
       );
+
+      // Send SOS message 3 times for reliability (as per requirements)
+      int successCount = 0;
+      for (int i = 0; i < 3; i++) {
+        bool sent = await messageProvider.sendMessage(sosMessage);
+        if (sent) {
+          successCount++;
+        }
+        // Small delay between sends
+        if (i < 2) {
+          await Future.delayed(const Duration(milliseconds: 500));
+        }
+      }
+
+      setState(() {
+        _isGettingLocation = false;
+        _locationInfo = 'SOS sent at $locationInfo ($accuracyInfo)';
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                Icon(Icons.check_circle, color: AppColors.white),
+                const SizedBox(width: AppSizes.paddingSmall),
+                Expanded(
+                  child: Text(
+                    successCount > 0
+                        ? 'SOS Alert sent successfully! ($successCount/3 broadcasts)'
+                        : 'SOS Alert queued. Will be sent when devices are connected.',
+                  ),
+                ),
+              ],
+            ),
+            backgroundColor: successCount > 0 ? AppColors.success : AppColors.warning,
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      }
+    } catch (e) {
+      setState(() {
+        _isGettingLocation = false;
+        _errorMessage = 'Error sending SOS: $e';
+      });
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(_errorMessage!),
+            backgroundColor: AppColors.danger,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
     }
   }
 
@@ -145,7 +259,7 @@ class _SOSScreenState extends State<SOSScreen> {
 
               const SizedBox(height: AppSizes.paddingLarge),
 
-              // Location Info
+              // Location Info or Error Message
               if (_locationInfo != null)
                 Container(
                   padding: const EdgeInsets.all(AppSizes.paddingMedium),
@@ -169,6 +283,36 @@ class _SOSScreenState extends State<SOSScreen> {
                           _locationInfo!,
                           style: AppTextStyles.body.copyWith(
                             color: AppColors.success,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              
+              if (_errorMessage != null)
+                Container(
+                  padding: const EdgeInsets.all(AppSizes.paddingMedium),
+                  decoration: BoxDecoration(
+                    color: AppColors.danger.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(AppSizes.borderRadius),
+                    border: Border.all(
+                      color: AppColors.danger,
+                      width: 2,
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.error_outline,
+                        color: AppColors.danger,
+                      ),
+                      const SizedBox(width: AppSizes.paddingSmall),
+                      Expanded(
+                        child: Text(
+                          _errorMessage!,
+                          style: AppTextStyles.body.copyWith(
+                            color: AppColors.danger,
                           ),
                         ),
                       ),

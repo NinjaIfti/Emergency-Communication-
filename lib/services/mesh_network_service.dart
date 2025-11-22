@@ -40,14 +40,18 @@ class RoutingTable {
   final Map<String, PeerRoute> _routes = {};
 
   // Add or update a route
-  void addRoute(String peerId, String nextHop, int hopCount) {
+  void addRoute(String peerId, String nextHop, int hopCount, {bool silent = false}) {
+    final routeExisted = _routes.containsKey(peerId);
     _routes[peerId] = PeerRoute(
       peerId: peerId,
       nextHop: nextHop,
       hopCount: hopCount,
       lastUpdated: DateTime.now(),
     );
-    print('Route added: $peerId -> $nextHop (hops: $hopCount)');
+    // Only log if route is new and not silent mode
+    if (!routeExisted && !silent) {
+      print('Route added: $peerId -> $nextHop (hops: $hopCount)');
+    }
   }
 
   // Get next hop for destination
@@ -62,23 +66,55 @@ class RoutingTable {
 
   // Update routes based on connected peers
   void updateRoutes(List<Peer> connectedPeers) {
+    // Get list of connected peer IDs
+    final connectedPeerIds = connectedPeers
+        .where((p) => p.isConnected)
+        .map((p) => p.peerId)
+        .toSet();
+    
+    // Get current route peer IDs
+    final currentRoutePeerIds = _routes.keys.toSet();
+    
+    // Quick check: if sets are identical, no changes needed
+    if (connectedPeerIds.length == currentRoutePeerIds.length &&
+        connectedPeerIds.every((id) => currentRoutePeerIds.contains(id)) &&
+        currentRoutePeerIds.every((id) => connectedPeerIds.contains(id))) {
+      // No changes, skip update
+      return;
+    }
+    
+    final previousRouteCount = _routes.length;
+    bool routesChanged = false;
+    
     // Remove stale routes (peers not connected anymore)
-    _routes.removeWhere((peerId, route) {
-      final exists = connectedPeers.any((p) => p.peerId == peerId);
-      if (!exists) {
-        print('Route removed: $peerId (peer disconnected)');
-      }
-      return !exists;
-    });
+    final removedRoutes = currentRoutePeerIds
+        .where((peerId) => !connectedPeerIds.contains(peerId))
+        .toList();
+    
+    for (var peerId in removedRoutes) {
+      _routes.remove(peerId);
+      print('Route removed: $peerId (peer disconnected)');
+      routesChanged = true;
+    }
 
-    // Add direct routes for connected peers
-    for (var peer in connectedPeers) {
-      if (peer.isConnected) {
-        addRoute(peer.peerId, peer.peerId, 1);
+    // Add direct routes for connected peers (use silent mode to avoid duplicate logs)
+    for (var peerId in connectedPeerIds) {
+      final routeExisted = _routes.containsKey(peerId);
+      // Use silent mode if route already exists
+      addRoute(peerId, peerId, 1, silent: routeExisted);
+      if (!routeExisted) {
+        routesChanged = true;
       }
     }
 
-    print('Routing table updated: ${_routes.length} routes');
+    // Only print if routes actually changed (to reduce log spam)
+    final newRouteCount = _routes.length;
+    if (routesChanged || newRouteCount != previousRouteCount) {
+      if (newRouteCount > 0 || previousRouteCount > 0) {
+        // Only log if there are routes now or there were routes before
+        print('Routing table updated: $newRouteCount routes');
+      }
+    }
   }
 
   // Get all routes
