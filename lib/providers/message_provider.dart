@@ -5,9 +5,11 @@ import '../services/bluetooth_service.dart';
 import '../services/message_queue_service.dart';
 import '../services/mesh_network_service.dart';
 import '../services/message_routing_service.dart';
+import '../services/encryption_service.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart' as fbp;
+import 'package:uuid/uuid.dart';
 
 class MessageProvider extends ChangeNotifier {
   final MessageDao _messageDao = MessageDao();
@@ -15,6 +17,8 @@ class MessageProvider extends ChangeNotifier {
   final MessageQueueService _queueService = MessageQueueService.instance;
   final MeshNetworkService _meshService = MeshNetworkService.instance;
   final MessageRoutingService _routingService = MessageRoutingService.instance;
+  final EncryptionService _encryptionService = EncryptionService.instance;
+  final Uuid _uuid = const Uuid();
   
   List<Message> _messages = [];
   bool _isLoading = false;
@@ -96,9 +100,34 @@ class MessageProvider extends ChangeNotifier {
       // Process the received message with mesh network service
       await _meshService.processReceivedMessage(message);
       
-      // If message is for this device, add to local messages
+      // If message is for this device, decrypt and process
       if (message.recipientId == _myDeviceId || message.recipientId == 'broadcast') {
-        await receiveMessage(message);
+        // Decrypt message if encrypted
+        Message decryptedMessage = message;
+        if (message.isEncrypted && message.messageType != MessageType.ACK) {
+          try {
+            await _encryptionService.initialize();
+            final decryptedContent = _encryptionService.decrypt(message.content);
+            decryptedMessage = message.copyWith(
+              content: decryptedContent,
+              isEncrypted: false,
+            );
+          } catch (e) {
+            print('Error decrypting message: $e');
+            _error = 'Failed to decrypt message: $e';
+            notifyListeners();
+            return;
+          }
+        }
+        
+        // Handle ACK messages for delivery confirmation
+        if (message.messageType == MessageType.ACK) {
+          await _handleAckMessage(message);
+        } else {
+          // Send ACK for non-ACK messages
+          await _sendAckMessage(message);
+          await receiveMessage(decryptedMessage);
+        }
       }
       
       print('Message parsed and processed: ${message.id}');
@@ -179,17 +208,60 @@ class MessageProvider extends ChangeNotifier {
         return;
       }
 
-      // Insert into database
-      await _messageDao.insertMessage(message);
+      // Store decrypted version in database
+      final messageToStore = message.copyWith(isEncrypted: false);
+      await _messageDao.insertMessage(messageToStore);
       
       // Add to local list
-      _messages.add(message);
+      _messages.add(messageToStore);
       notifyListeners();
 
       print('Message received: ${message.id}');
     } catch (e) {
       _error = 'Failed to receive message: $e';
       notifyListeners();
+    }
+  }
+
+  // Send ACK message for delivery confirmation
+  Future<void> _sendAckMessage(Message originalMessage) async {
+    try {
+      if (originalMessage.messageType == MessageType.ACK) {
+        return; // Don't send ACK for ACK messages
+      }
+
+      final ackMessage = Message(
+        id: _uuid.v4(),
+        content: originalMessage.id,
+        senderId: _myDeviceId,
+        recipientId: originalMessage.senderId,
+        timestamp: DateTime.now().millisecondsSinceEpoch,
+        messageType: MessageType.ACK,
+        isDelivered: false,
+      );
+
+      await _meshService.sendMessage(ackMessage);
+      print('ACK sent for message: ${originalMessage.id}');
+    } catch (e) {
+      print('Error sending ACK: $e');
+    }
+  }
+
+  // Handle received ACK message
+  Future<void> _handleAckMessage(Message ackMessage) async {
+    try {
+      // ACK message content contains the original message ID
+      final originalMessageId = ackMessage.content;
+      
+      // Update delivery status of the original message
+      await updateMessageStatus(originalMessageId, true);
+      
+      // Notify queue service that message was delivered
+      await _queueService.markMessageDelivered(originalMessageId);
+      
+      print('ACK received for message: $originalMessageId');
+    } catch (e) {
+      print('Error handling ACK: $e');
     }
   }
 

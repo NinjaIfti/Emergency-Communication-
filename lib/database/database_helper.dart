@@ -17,7 +17,7 @@ class DatabaseHelper {
     return _database!;
   }
 
-  // Ensure latitude/longitude columns exist in messages table
+  // Ensure columns exist in messages table
   Future<void> _ensureColumnsExist(Database db) async {
     try {
       // Get table info to check existing columns
@@ -35,6 +35,12 @@ class DatabaseHelper {
         await db.execute('ALTER TABLE messages ADD COLUMN longitude REAL');
         print('Added longitude column to messages table');
       }
+      
+      // Add is_encrypted column if it doesn't exist
+      if (!columnNames.contains('is_encrypted')) {
+        await db.execute('ALTER TABLE messages ADD COLUMN is_encrypted INTEGER DEFAULT 0');
+        print('Added is_encrypted column to messages table');
+      }
     } catch (e) {
       print('Error ensuring columns exist: $e');
       // If table doesn't exist yet, onCreate will handle it
@@ -47,7 +53,7 @@ class DatabaseHelper {
 
     final db = await openDatabase(
       path,
-      version: 2,
+      version: 3,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
@@ -71,7 +77,8 @@ class DatabaseHelper {
         hop_count INTEGER DEFAULT 0,
         message_type TEXT NOT NULL,
         latitude REAL,
-        longitude REAL
+        longitude REAL,
+        is_encrypted INTEGER DEFAULT 0
       )
     ''');
 
@@ -133,6 +140,20 @@ class DatabaseHelper {
           }
           print('Database upgraded to version 2: Added latitude/longitude columns (via PRAGMA check)');
         }
+      }
+    }
+    
+    if (oldVersion < 3) {
+      try {
+        final tableInfo = await db.rawQuery('PRAGMA table_info(messages)');
+        final columnNames = tableInfo.map((row) => row['name'] as String).toList();
+        
+        if (!columnNames.contains('is_encrypted')) {
+          await db.execute('ALTER TABLE messages ADD COLUMN is_encrypted INTEGER DEFAULT 0');
+          print('Database upgraded to version 3: Added is_encrypted column');
+        }
+      } catch (e) {
+        print('Error adding is_encrypted column: $e');
       }
     }
   }

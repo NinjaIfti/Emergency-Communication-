@@ -2,6 +2,7 @@ import 'dart:async';
 import '../models/message_model.dart';
 import '../models/peer_model.dart';
 import '../services/bluetooth_service.dart';
+import '../services/encryption_service.dart';
 import '../database/message_dao.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart' as fbp;
 import 'dart:convert';
@@ -145,6 +146,7 @@ class MeshNetworkService {
 
   final RoutingTable _routingTable = RoutingTable();
   final BluetoothService _bluetoothService = BluetoothService.instance;
+  final EncryptionService _encryptionService = EncryptionService.instance;
   final MessageDao _messageDao = MessageDao();
   
   String? _myDeviceId;
@@ -185,8 +187,23 @@ class MeshNetworkService {
         hopCount: message.hopCount + 1,
       );
 
+      // Encrypt message content if not already encrypted and not an ACK
+      Message messageToSend = forwardedMessage;
+      if (forwardedMessage.messageType != MessageType.ACK && !forwardedMessage.isEncrypted) {
+        try {
+          await _encryptionService.initialize();
+          final encryptedContent = _encryptionService.encrypt(forwardedMessage.content);
+          messageToSend = forwardedMessage.copyWith(
+            content: encryptedContent,
+            isEncrypted: true,
+          );
+        } catch (e) {
+          print('Error encrypting message during forward: $e');
+        }
+      }
+
       // Convert to JSON
-      final jsonMessage = jsonEncode(forwardedMessage.toJson());
+      final jsonMessage = jsonEncode(messageToSend.toJson());
 
       // Send to next hop
       bool sent = await _bluetoothService.sendMessage(device, jsonMessage);
@@ -222,9 +239,23 @@ class MeshNetworkService {
       int successCount = 0;
 
       // Increment hop count for broadcast
-      final broadcastMessage = message.copyWith(
+      var broadcastMessage = message.copyWith(
         hopCount: message.hopCount + 1,
       );
+
+      // Encrypt message content if not already encrypted and not an ACK
+      if (broadcastMessage.messageType != MessageType.ACK && !broadcastMessage.isEncrypted) {
+        try {
+          await _encryptionService.initialize();
+          final encryptedContent = _encryptionService.encrypt(broadcastMessage.content);
+          broadcastMessage = broadcastMessage.copyWith(
+            content: encryptedContent,
+            isEncrypted: true,
+          );
+        } catch (e) {
+          print('Error encrypting message during broadcast: $e');
+        }
+      }
 
       // Convert to JSON
       final jsonMessage = jsonEncode(broadcastMessage.toJson());
@@ -256,14 +287,32 @@ class MeshNetworkService {
       // Check if destination is directly connected
       final connectedDevices = await _bluetoothService.getConnectedDevices();
       
+      // Encrypt message content if not already encrypted and not an ACK
+      Message messageToSend = message;
+      if (message.messageType != MessageType.ACK && !message.isEncrypted) {
+        try {
+          await _encryptionService.initialize();
+          final encryptedContent = _encryptionService.encrypt(message.content);
+          messageToSend = message.copyWith(
+            content: encryptedContent,
+            isEncrypted: true,
+          );
+          // Update database with encrypted version
+          await _messageDao.insertMessage(messageToSend);
+        } catch (e) {
+          print('Error encrypting message: $e');
+          // Continue with unencrypted message if encryption fails
+        }
+      }
+
       // Try direct connection first
       for (var device in connectedDevices) {
-        if (device.id.toString() == message.recipientId) {
-          final jsonMessage = jsonEncode(message.toJson());
+        if (device.id.toString() == messageToSend.recipientId) {
+          final jsonMessage = jsonEncode(messageToSend.toJson());
           bool sent = await _bluetoothService.sendMessage(device, jsonMessage);
           
           if (sent) {
-            print('Message sent directly: ${message.id}');
+            print('Message sent directly: ${messageToSend.id}');
             return true;
           }
         }
@@ -276,14 +325,14 @@ class MeshNetworkService {
         // Find device with next hop ID
         for (var device in connectedDevices) {
           if (device.id.toString() == nextHop) {
-            return await forwardMessage(message, device);
+            return await forwardMessage(messageToSend, device);
           }
         }
       }
 
       // If no route found, broadcast (flooding)
-      print('No direct route, broadcasting message: ${message.id}');
-      int broadcastCount = await broadcastMessage(message);
+      print('No direct route, broadcasting message: ${messageToSend.id}');
+      int broadcastCount = await broadcastMessage(messageToSend);
       return broadcastCount > 0;
 
     } catch (e) {

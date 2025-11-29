@@ -9,6 +9,7 @@ class Message {
   final MessageType messageType;
   final double? latitude;
   final double? longitude;
+  final bool isEncrypted;
 
   Message({
     required this.id,
@@ -21,6 +22,7 @@ class Message {
     required this.messageType,
     this.latitude,
     this.longitude,
+    this.isEncrypted = false,
   });
 
   // Convert Message to JSON for transmission
@@ -36,6 +38,7 @@ class Message {
       'ttl': 5,
       'latitude': latitude,
       'longitude': longitude,
+      'isEncrypted': isEncrypted,
     };
   }
 
@@ -51,6 +54,7 @@ class Message {
       messageType: _messageTypeFromString(json['type']),
       latitude: json['latitude']?.toDouble(),
       longitude: json['longitude']?.toDouble(),
+      isEncrypted: json['isEncrypted'] ?? false,
     );
   }
 
@@ -67,6 +71,7 @@ class Message {
       'message_type': messageType.toString().split('.').last,
       'latitude': latitude,
       'longitude': longitude,
+      'is_encrypted': isEncrypted ? 1 : 0,
     };
   }
 
@@ -83,6 +88,7 @@ class Message {
       messageType: _messageTypeFromString(map['message_type']),
       latitude: map['latitude']?.toDouble(),
       longitude: map['longitude']?.toDouble(),
+      isEncrypted: map['is_encrypted'] == 1,
     );
   }
 
@@ -109,6 +115,7 @@ class Message {
     MessageType? messageType,
     double? latitude,
     double? longitude,
+    bool? isEncrypted,
   }) {
     return Message(
       id: id ?? this.id,
@@ -121,6 +128,7 @@ class Message {
       messageType: messageType ?? this.messageType,
       latitude: latitude ?? this.latitude,
       longitude: longitude ?? this.longitude,
+      isEncrypted: isEncrypted ?? this.isEncrypted,
     );
   }
 }

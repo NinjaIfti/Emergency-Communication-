@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../utils/constants.dart';
+import '../services/encryption_service.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -27,12 +28,24 @@ class _SplashScreenState extends State<SplashScreen>
 
     _controller.forward();
 
+    // Initialize encryption service
+    _initializeServices();
+
     // Navigate to home after 3 seconds
     Future.delayed(const Duration(seconds: 3), () {
       if (mounted) {
         Navigator.of(context).pushReplacementNamed(AppRoutes.home);
       }
     });
+  }
+
+  Future<void> _initializeServices() async {
+    try {
+      await EncryptionService.instance.initialize();
+      print('Encryption service initialized successfully');
+    } catch (e) {
+      print('Error initializing encryption service: $e');
+    }
   }
 
   @override

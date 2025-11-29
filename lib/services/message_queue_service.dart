@@ -2,6 +2,7 @@ import 'dart:async';
 import '../models/message_model.dart';
 import '../database/message_dao.dart';
 import '../services/bluetooth_service.dart';
+import '../services/mesh_network_service.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart' as fbp;
 import 'dart:convert';
 
@@ -12,9 +13,15 @@ class MessageQueueService {
 
   final MessageDao _messageDao = MessageDao();
   final BluetoothService _bluetoothService = BluetoothService.instance;
+  final MeshNetworkService _meshService = MeshNetworkService.instance;
   
   Timer? _retryTimer;
   bool _isProcessing = false;
+  
+  // Track pending messages with their send timestamps for timeout checking
+  final Map<String, int> _pendingMessages = {};
+  
+  static const int _deliveryTimeoutSeconds = 30;
 
   // Start queue processing with retry logic
   void startQueueProcessing({Duration interval = const Duration(seconds: 10)}) {
@@ -67,19 +74,44 @@ class MessageQueueService {
         return;
       }
 
-      // Try to send each message
+      final currentTime = DateTime.now().millisecondsSinceEpoch;
+      
+      // Try to send each undelivered message
       for (var message in undeliveredMessages) {
-        for (var device in connectedDevices) {
-          bool sent = await _sendMessageToDevice(message, device);
+        // Skip ACK messages - they don't need confirmation
+        if (message.messageType == MessageType.ACK) {
+          continue;
+        }
+        
+        // Check if message has timed out (no ACK received)
+        if (_pendingMessages.containsKey(message.id)) {
+          final sentTime = _pendingMessages[message.id]!;
+          final elapsedSeconds = (currentTime - sentTime) ~/ 1000;
           
-          if (sent) {
-            print('Queued message sent: ${message.id}');
-            // Mark as delivered
-            await _messageDao.updateMessageStatus(message.id, true);
-            break; // Move to next message
+          if (elapsedSeconds > _deliveryTimeoutSeconds) {
+            print('Message ${message.id} timed out, will retry');
+            _pendingMessages.remove(message.id);
+          } else {
+            // Still waiting for ACK, skip retry
+            continue;
           }
         }
+        
+        // Try to send via mesh network
+        bool sent = await _meshService.sendMessage(message);
+        
+        if (sent) {
+          print('Queued message sent: ${message.id}');
+          // Track sent time to wait for ACK
+          _pendingMessages[message.id] = currentTime;
+        }
       }
+      
+      // Clean up old pending messages (older than timeout)
+      _pendingMessages.removeWhere((id, sentTime) {
+        final elapsedSeconds = (currentTime - sentTime) ~/ 1000;
+        return elapsedSeconds > _deliveryTimeoutSeconds * 2;
+      });
     } catch (e) {
       print('Error processing queue: $e');
     } finally {
@@ -87,19 +119,14 @@ class MessageQueueService {
     }
   }
 
-  // Send a single message to a device
-  Future<bool> _sendMessageToDevice(Message message, fbp.BluetoothDevice device) async {
+  // Mark message as delivered (called when ACK is received)
+  Future<void> markMessageDelivered(String messageId) async {
     try {
-      // Convert message to JSON
-      final jsonMessage = jsonEncode(message.toJson());
-      
-      // Send via Bluetooth
-      bool sent = await _bluetoothService.sendMessage(device, jsonMessage);
-      
-      return sent;
+      _pendingMessages.remove(messageId);
+      await _messageDao.updateMessageStatus(messageId, true);
+      print('Message marked as delivered: $messageId');
     } catch (e) {
-      print('Error sending message to ${device.name}: $e');
-      return false;
+      print('Error marking message as delivered: $e');
     }
   }
 
@@ -113,15 +140,25 @@ class MessageQueueService {
     }
   }
 
-  // Get queue size
+  // Get queue size (undelivered messages)
   Future<int> getQueueSize() async {
     try {
       final undelivered = await _messageDao.getUndeliveredMessages();
-      return undelivered.length;
+      return undelivered.where((m) => m.messageType != MessageType.ACK).length;
     } catch (e) {
       print('Error getting queue size: $e');
       return 0;
     }
+  }
+  
+  // Get pending messages count (waiting for ACK)
+  int getPendingMessagesCount() {
+    return _pendingMessages.length;
+  }
+  
+  // Clear pending messages tracking
+  void clearPendingMessages() {
+    _pendingMessages.clear();
   }
 
   // Clear all queued messages (for testing)
