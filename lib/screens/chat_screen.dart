@@ -5,6 +5,7 @@ import '../utils/constants.dart';
 import '../widgets/message_bubble.dart';
 import '../models/message_model.dart';
 import '../providers/message_provider.dart';
+import '../providers/peer_provider.dart';
 
 class ChatScreen extends StatefulWidget {
   final String peerName;
@@ -23,15 +24,19 @@ class ChatScreen extends StatefulWidget {
 class _ChatScreenState extends State<ChatScreen> {
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
-  final String _userId = 'my-user-id'; // This should come from user settings
+  String? _userId;
 
   @override
   void initState() {
     super.initState();
     // Load conversation when screen opens
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      Provider.of<MessageProvider>(context, listen: false)
-          .loadConversation(_userId, widget.peerId);
+      final messageProvider = Provider.of<MessageProvider>(context, listen: false);
+      _userId = messageProvider.myDeviceId;
+      messageProvider.loadConversation(_userId!, widget.peerId);
+      
+      // Load all messages to get real-time updates
+      messageProvider.loadMessages();
     });
   }
 
@@ -44,6 +49,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   void _sendMessage() {
     if (_messageController.text.trim().isEmpty) return;
+    if (_userId == null) return;
 
     final messageProvider = Provider.of<MessageProvider>(context, listen: false);
     
@@ -51,7 +57,7 @@ class _ChatScreenState extends State<ChatScreen> {
     final message = Message(
       id: const Uuid().v4(),
       content: _messageController.text.trim(),
-      senderId: _userId,
+      senderId: _userId!,
       recipientId: widget.peerId,
       timestamp: DateTime.now().millisecondsSinceEpoch,
       messageType: MessageType.TEXT,
@@ -79,18 +85,25 @@ class _ChatScreenState extends State<ChatScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(widget.peerName),
-            Text(
-              'Offline',
-              style: AppTextStyles.caption.copyWith(
-                color: AppColors.white.withOpacity(0.8),
-                fontSize: 12,
-              ),
-            ),
-          ],
+        title: Consumer<PeerProvider>(
+          builder: (context, peerProvider, child) {
+            final peer = peerProvider.getPeerById(widget.peerId);
+            final isConnected = peer?.isConnected ?? false;
+            
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(widget.peerName),
+                Text(
+                  isConnected ? 'Online' : 'Offline',
+                  style: AppTextStyles.caption.copyWith(
+                    color: AppColors.white.withOpacity(0.8),
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            );
+          },
         ),
         backgroundColor: AppColors.secondary,
         foregroundColor: AppColors.white,
@@ -105,11 +118,20 @@ class _ChatScreenState extends State<ChatScreen> {
       ),
       body: Column(
         children: [
-          // Messages List with Provider
+          // Messages List with Provider (real-time updates)
           Expanded(
             child: Consumer<MessageProvider>(
               builder: (context, messageProvider, child) {
-                if (messageProvider.isLoading) {
+                // Auto-refresh messages periodically for real-time updates
+                if (messageProvider.messages.isEmpty && !messageProvider.isLoading) {
+                  // Reload if empty
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    final userId = _userId ?? messageProvider.myDeviceId;
+                    messageProvider.loadConversation(userId, widget.peerId);
+                  });
+                }
+
+                if (messageProvider.isLoading && messageProvider.messages.isEmpty) {
                   return const Center(
                     child: CircularProgressIndicator(),
                   );
@@ -143,9 +165,10 @@ class _ChatScreenState extends State<ChatScreen> {
                 }
 
                 // Filter messages for this conversation
+                final userId = _userId ?? messageProvider.myDeviceId;
                 final conversationMessages = messageProvider.messages.where((m) =>
-                  (m.senderId == _userId && m.recipientId == widget.peerId) ||
-                  (m.senderId == widget.peerId && m.recipientId == _userId)
+                  (m.senderId == userId && m.recipientId == widget.peerId) ||
+                  (m.senderId == widget.peerId && m.recipientId == userId)
                 ).toList();
 
                 return ListView.builder(
@@ -154,7 +177,8 @@ class _ChatScreenState extends State<ChatScreen> {
                   itemCount: conversationMessages.length,
                   itemBuilder: (context, index) {
                     final message = conversationMessages[index];
-                    final isSent = message.senderId == _userId;
+                    final userId = _userId ?? messageProvider.myDeviceId;
+                    final isSent = message.senderId == userId;
                     return MessageBubble(
                       message: message,
                       isSent: isSent,

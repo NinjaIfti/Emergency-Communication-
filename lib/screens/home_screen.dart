@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../utils/constants.dart';
 import '../widgets/connection_indicator.dart';
+import '../providers/peer_provider.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -21,74 +23,83 @@ class HomeScreen extends StatelessWidget {
           ),
         ],
       ),
-      body: Column(
-        children: [
-          // Connection Status Card
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(AppSizes.paddingLarge),
-            color: AppColors.lightGrey,
-            child: Column(
-              children: [
-                const ConnectionIndicator(
-                  isConnected: false,
-                  peerCount: 0,
+      body: Consumer<PeerProvider>(
+        builder: (context, peerProvider, child) {
+          final connectedCount = peerProvider.connectedPeerCount;
+          final isConnected = connectedCount > 0;
+          
+          return Column(
+            children: [
+              // Connection Status Card
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(AppSizes.paddingLarge),
+                color: AppColors.lightGrey,
+                child: Column(
+                  children: [
+                    ConnectionIndicator(
+                      isConnected: isConnected,
+                      peerCount: connectedCount,
+                    ),
+                    const SizedBox(height: AppSizes.paddingSmall),
+                    Text(
+                      isConnected
+                          ? '$connectedCount device${connectedCount == 1 ? '' : 's'} connected'
+                          : 'No devices connected',
+                      style: AppTextStyles.caption,
+                    ),
+                  ],
                 ),
-                const SizedBox(height: AppSizes.paddingSmall),
-                Text(
-                  'No devices connected',
-                  style: AppTextStyles.caption,
-                ),
-              ],
-            ),
-          ),
-
-          // Main Menu Grid
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.all(AppSizes.paddingLarge),
-              child: GridView.count(
-                crossAxisCount: 2,
-                mainAxisSpacing: AppSizes.paddingMedium,
-                crossAxisSpacing: AppSizes.paddingMedium,
-                children: [
-                  _MenuCard(
-                    icon: Icons.chat_bubble_outline,
-                    title: 'Messages',
-                    color: AppColors.secondary,
-                    onTap: () {
-                      Navigator.pushNamed(context, AppRoutes.chat);
-                    },
-                  ),
-                  _MenuCard(
-                    icon: Icons.emergency,
-                    title: 'SOS Alert',
-                    color: AppColors.primary,
-                    onTap: () {
-                      Navigator.pushNamed(context, AppRoutes.sos);
-                    },
-                  ),
-                  _MenuCard(
-                    icon: Icons.people_outline,
-                    title: 'Nearby Devices',
-                    color: AppColors.success,
-                    onTap: () {
-                      Navigator.pushNamed(context, AppRoutes.peers);
-                    },
-                  ),
-                  _MenuCard(
-                    icon: Icons.map_outlined,
-                    title: 'Locations',
-                    color: AppColors.warning,
-                    onTap: () {
-                      Navigator.pushNamed(context, AppRoutes.map);
-                    },
-                  ),
-                ],
               ),
-            ),
-          ),
-        ],
+
+              // Main Menu Grid
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.all(AppSizes.paddingLarge),
+                  child: GridView.count(
+                    crossAxisCount: 2,
+                    mainAxisSpacing: AppSizes.paddingMedium,
+                    crossAxisSpacing: AppSizes.paddingMedium,
+                    children: [
+                      _MenuCard(
+                        icon: Icons.chat_bubble_outline,
+                        title: 'Messages',
+                        color: AppColors.secondary,
+                        onTap: () {
+                          Navigator.pushNamed(context, AppRoutes.chat);
+                        },
+                      ),
+                      _MenuCard(
+                        icon: Icons.emergency,
+                        title: 'SOS Alert',
+                        color: AppColors.primary,
+                        onTap: () {
+                          Navigator.pushNamed(context, AppRoutes.sos);
+                        },
+                      ),
+                      _MenuCard(
+                        icon: Icons.people_outline,
+                        title: 'Nearby Devices',
+                        color: AppColors.success,
+                        onTap: () {
+                          Navigator.pushNamed(context, AppRoutes.peers);
+                        },
+                      ),
+                      _MenuCard(
+                        icon: Icons.map_outlined,
+                        title: 'Locations',
+                        color: AppColors.warning,
+                        onTap: () {
+                          Navigator.pushNamed(context, AppRoutes.map);
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () {

@@ -18,6 +18,32 @@ void main() {
 class EmergencyCommApp extends StatelessWidget {
   const EmergencyCommApp({super.key});
 
+  // Helper method to generate routes with smooth transitions
+  Widget _generateRoute(RouteSettings settings) {
+    switch (settings.name) {
+      case AppRoutes.splash:
+        return const SplashScreen();
+      case AppRoutes.home:
+        return const HomeScreen();
+      case AppRoutes.chat:
+        final args = settings.arguments as Map<String, dynamic>?;
+        return ChatScreen(
+          peerName: args?['peerName'] ?? 'Unknown',
+          peerId: args?['peerId'] ?? '',
+        );
+      case AppRoutes.sos:
+        return const SOSScreen();
+      case AppRoutes.peers:
+        return const PeersScreen();
+      case AppRoutes.map:
+        return const MapScreen();
+      case AppRoutes.settings:
+        return const SettingsScreen();
+      default:
+        return const HomeScreen();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return MultiProvider(
@@ -46,44 +72,24 @@ class EmergencyCommApp extends StatelessWidget {
       ),
       initialRoute: AppRoutes.splash,
       onGenerateRoute: (settings) {
-        switch (settings.name) {
-          case AppRoutes.splash:
-            return MaterialPageRoute(
-              builder: (_) => const SplashScreen(),
-            );
-          case AppRoutes.home:
-            return MaterialPageRoute(
-              builder: (_) => const HomeScreen(),
-            );
-          case AppRoutes.chat:
-            final args = settings.arguments as Map<String, dynamic>?;
-            return MaterialPageRoute(
-              builder: (_) => ChatScreen(
-                peerName: args?['peerName'] ?? 'Unknown',
-                peerId: args?['peerId'] ?? '',
+        // Smooth page transition with fade effect
+        Widget page = _generateRoute(settings);
+        
+        return PageRouteBuilder(
+          settings: settings,
+          pageBuilder: (context, animation, secondaryAnimation) => page,
+          transitionsBuilder: (context, animation, secondaryAnimation, child) {
+            // Fade transition for smooth navigation
+            return FadeTransition(
+              opacity: CurvedAnimation(
+                parent: animation,
+                curve: Curves.easeInOut,
               ),
+              child: child,
             );
-          case AppRoutes.sos:
-            return MaterialPageRoute(
-              builder: (_) => const SOSScreen(),
-            );
-          case AppRoutes.peers:
-            return MaterialPageRoute(
-              builder: (_) => const PeersScreen(),
-            );
-          case AppRoutes.map:
-            return MaterialPageRoute(
-              builder: (_) => const MapScreen(),
-            );
-          case AppRoutes.settings:
-            return MaterialPageRoute(
-              builder: (_) => const SettingsScreen(),
-            );
-          default:
-            return MaterialPageRoute(
-              builder: (_) => const HomeScreen(),
-            );
-        }
+          },
+          transitionDuration: const Duration(milliseconds: 200),
+        );
       },
       ),
     );

@@ -69,9 +69,10 @@ class LocationService {
         return null;
       }
 
-      // Get position
+      // Get position with balanced accuracy for battery optimization
+      // Use medium accuracy for SOS (good enough, saves battery)
       return await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
+        desiredAccuracy: LocationAccuracy.medium,
         timeLimit: const Duration(seconds: 10),
       );
     } catch (e) {
@@ -101,10 +102,10 @@ class LocationService {
         return;
       }
 
-      // Start listening
+      // Start listening with optimized settings for battery
       const LocationSettings locationSettings = LocationSettings(
-        accuracy: LocationAccuracy.high,
-        distanceFilter: 10, // Update every 10 meters
+        accuracy: LocationAccuracy.medium, // Medium accuracy saves battery
+        distanceFilter: 50, // Update every 50 meters (reduced from 10m)
       );
 
       _positionStreamSubscription = Geolocator.getPositionStream(

@@ -60,7 +60,8 @@ class BluetoothService {
   }
 
   // Start scanning for nearby devices
-  Future<void> startScan({Duration timeout = const Duration(seconds: 10)}) async {
+  // Optimized timeout: shorter scan saves battery
+  Future<void> startScan({Duration timeout = const Duration(seconds: 8)}) async {
     try {
       // Check if Bluetooth is enabled first
       final isEnabled = await isBluetoothEnabled();
