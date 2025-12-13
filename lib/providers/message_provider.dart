@@ -6,6 +6,7 @@ import '../services/message_queue_service.dart';
 import '../services/mesh_network_service.dart';
 import '../services/message_routing_service.dart';
 import '../services/encryption_service.dart';
+import '../utils/app_logger.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart' as fbp;
@@ -174,9 +175,24 @@ class MessageProvider extends ChangeNotifier {
     }
   }
 
-  // Send a message
+  // Send a message with data loss prevention
   Future<bool> sendMessage(Message message) async {
     try {
+      // CRITICAL: Save to database first to prevent data loss
+      try {
+        await _messageDao.insertMessage(message);
+        AppLogger.instance.info('Message saved to database: ${message.id}', tag: 'MessageProvider');
+      } catch (dbError) {
+        AppLogger.instance.error(
+          'CRITICAL: Failed to save message to database',
+          tag: 'MessageProvider',
+          error: dbError,
+        );
+        _error = 'Failed to save message. Please try again.';
+        notifyListeners();
+        return false; // Don't proceed if we can't save
+      }
+
       // Add to local list
       _messages.add(message);
       notifyListeners();
@@ -185,39 +201,61 @@ class MessageProvider extends ChangeNotifier {
       bool sent = await _meshService.sendMessage(message);
       
       if (sent) {
-        print('Message sent via mesh network: ${message.id}');
+        AppLogger.instance.info('Message sent via mesh network: ${message.id}', tag: 'MessageProvider');
         return true;
       } else {
-        print('Failed to send via mesh network, queued for retry');
+        AppLogger.instance.warning(
+          'Failed to send via mesh network, queued for retry: ${message.id}',
+          tag: 'MessageProvider',
+        );
+        // Message is already in database, queue service will retry
         return false;
       }
     } catch (e) {
+      AppLogger.instance.error(
+        'Failed to send message: ${message.id}',
+        tag: 'MessageProvider',
+        error: e,
+      );
       _error = 'Failed to send message: $e';
       notifyListeners();
       return false;
     }
   }
 
-  // Receive a message
+  // Receive a message with duplicate prevention
   Future<void> receiveMessage(Message message) async {
     try {
-      // Check if message already exists
+      // Check if message already exists (prevent duplicates)
       final existing = await _messageDao.getMessageById(message.id);
       if (existing != null) {
-        print('Message already exists: ${message.id}');
+        AppLogger.instance.debug('Message already exists (duplicate): ${message.id}', tag: 'MessageProvider');
         return;
       }
 
-      // Store decrypted version in database
+      // Store decrypted version in database (data persistence)
       final messageToStore = message.copyWith(isEncrypted: false);
-      await _messageDao.insertMessage(messageToStore);
+      try {
+        await _messageDao.insertMessage(messageToStore);
+        AppLogger.instance.info('Message received and saved: ${message.id}', tag: 'MessageProvider');
+      } catch (dbError) {
+        AppLogger.instance.error(
+          'CRITICAL: Failed to save received message to database',
+          tag: 'MessageProvider',
+          error: dbError,
+        );
+        // Still add to local list even if DB save fails
+      }
       
       // Add to local list
       _messages.add(messageToStore);
       notifyListeners();
-
-      print('Message received: ${message.id}');
     } catch (e) {
+      AppLogger.instance.error(
+        'Failed to receive message: ${message.id}',
+        tag: 'MessageProvider',
+        error: e,
+      );
       _error = 'Failed to receive message: $e';
       notifyListeners();
     }

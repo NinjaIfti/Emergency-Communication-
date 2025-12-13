@@ -8,6 +8,7 @@ import 'screens/sos_screen.dart';
 import 'screens/peers_screen.dart';
 import 'screens/map_screen.dart';
 import 'screens/settings_screen.dart';
+import 'screens/debug_screen.dart';
 import 'providers/message_provider.dart';
 import 'providers/peer_provider.dart';
 
@@ -39,6 +40,8 @@ class EmergencyCommApp extends StatelessWidget {
         return const MapScreen();
       case AppRoutes.settings:
         return const SettingsScreen();
+      case '/debug':
+        return const DebugScreen();
       default:
         return const HomeScreen();
     }

@@ -164,6 +164,7 @@ class AppRoutes {
   static const String peers = '/peers';
   static const String map = '/map';
   static const String settings = '/settings';
+  static const String debug = '/debug';
 }
 
 // Database Tables

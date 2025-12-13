@@ -154,6 +154,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
             subtitle: const Text('1.0.0'),
           ),
           ListTile(
+            leading: Icon(Icons.bug_report, color: AppColors.warning),
+            title: const Text('Debug & Monitoring'),
+            subtitle: const Text('View logs, network stats, and debug info'),
+            trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+            onTap: () {
+              Navigator.pushNamed(context, AppRoutes.debug);
+            },
+          ),
+          ListTile(
             leading: Icon(Icons.description_outlined, color: AppColors.secondary),
             title: const Text('Privacy Policy'),
             trailing: const Icon(Icons.arrow_forward_ios, size: 16),

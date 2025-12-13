@@ -1,6 +1,8 @@
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'dart:async';
+import '../utils/app_logger.dart';
+import '../services/network_failure_simulator.dart';
 
 class BluetoothService {
   static final BluetoothService instance = BluetoothService._init();
@@ -114,33 +116,79 @@ class BluetoothService {
     }
   }
 
-  // Connect to a device
-  Future<bool> connectToDevice(BluetoothDevice device) async {
+  // Connect to a device with retry mechanism
+  Future<bool> connectToDevice(BluetoothDevice device, {int maxRetries = 3}) async {
     try {
       // Check if already connected
       if (_connectionPool.containsKey(device.id.toString())) {
-        print('Device already in connection pool: ${device.name}');
+        AppLogger.instance.debug('Device already in connection pool: ${device.name}', tag: 'Bluetooth');
         return true;
       }
       
       // Check connection limit
       if (_connectionPool.length >= maxConnections) {
-        print('Connection limit reached ($maxConnections). Cannot connect to more devices.');
+        AppLogger.instance.warning(
+          'Connection limit reached ($maxConnections)',
+          tag: 'Bluetooth',
+        );
         return false;
       }
+
+      // Simulate network failure if enabled
+      final simulator = NetworkFailureSimulator.instance;
+      if (await simulator.simulateConnectionFailure()) {
+        AppLogger.instance.warning('Simulated connection failure', tag: 'Bluetooth');
+        return false;
+      }
+
+      // Retry connection logic
+      for (int attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          AppLogger.instance.info(
+            'Connecting to ${device.name} (attempt $attempt/$maxRetries)',
+            tag: 'Bluetooth',
+          );
+
+          await device.connect(
+            timeout: const Duration(seconds: 15),
+            autoConnect: false,
+          );
+          
+          // Add to connection pool
+          _connectionPool[device.id.toString()] = device;
+          AppLogger.instance.info(
+            'Device connected: ${device.name} (${_connectionPool.length}/$maxConnections)',
+            tag: 'Bluetooth',
+          );
+          
+          return true;
+        } catch (e) {
+          AppLogger.instance.warning(
+            'Connection attempt $attempt failed: $e',
+            tag: 'Bluetooth',
+          );
+          
+          if (attempt < maxRetries) {
+            // Wait before retry
+            await Future.delayed(Duration(seconds: attempt * 2));
+          } else {
+            AppLogger.instance.error(
+              'Failed to connect after $maxRetries attempts',
+              tag: 'Bluetooth',
+              error: e,
+            );
+            return false;
+          }
+        }
+      }
       
-      await device.connect(
-        timeout: const Duration(seconds: 15),
-        autoConnect: false,
-      );
-      
-      // Add to connection pool
-      _connectionPool[device.id.toString()] = device;
-      print('Device added to connection pool: ${device.name} (${_connectionPool.length}/$maxConnections)');
-      
-      return true;
+      return false;
     } catch (e) {
-      print('Error connecting to device: $e');
+      AppLogger.instance.error(
+        'Error connecting to device: ${device.name}',
+        tag: 'Bluetooth',
+        error: e,
+      );
       return false;
     }
   }
@@ -214,16 +262,29 @@ class BluetoothService {
     }
   }
 
-  // Send message to device
-  Future<bool> sendMessage(BluetoothDevice device, String message) async {
+  // Send message to device with retry and error handling
+  Future<bool> sendMessage(BluetoothDevice device, String message, {int maxRetries = 2}) async {
     try {
       final deviceId = device.id.toString();
+      
+      // Simulate network failure if enabled
+      final simulator = NetworkFailureSimulator.instance;
+      if (await simulator.simulateMessageLoss()) {
+        AppLogger.instance.warning('Simulated message loss', tag: 'Bluetooth');
+        return false;
+      }
+
+      // Add network delay if enabled
+      await simulator.simulateNetworkDelay();
       
       // Discover services if not already done
       if (!_writeCharacteristics.containsKey(deviceId)) {
         bool discovered = await discoverServicesAndCharacteristics(device);
         if (!discovered) {
-          print('Failed to discover characteristics for ${device.name}');
+          AppLogger.instance.warning(
+            'Failed to discover characteristics for ${device.name}',
+            tag: 'Bluetooth',
+          );
           return false;
         }
       }
@@ -231,20 +292,54 @@ class BluetoothService {
       // Get write characteristic for this device
       final writeChar = _writeCharacteristics[deviceId];
       if (writeChar == null) {
-        print('Write characteristic not found for ${device.name}');
+        AppLogger.instance.error(
+          'Write characteristic not found for ${device.name}',
+          tag: 'Bluetooth',
+        );
         return false;
       }
 
-      // Convert message to bytes
-      final bytes = message.codeUnits;
+      // Retry sending logic
+      for (int attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          // Convert message to bytes
+          final bytes = message.codeUnits;
+          
+          // Write to characteristic
+          await writeChar.write(bytes, withoutResponse: false);
+          AppLogger.instance.debug(
+            'Message sent to ${device.name} (attempt $attempt)',
+            tag: 'Bluetooth',
+          );
+          
+          return true;
+        } catch (e) {
+          AppLogger.instance.warning(
+            'Send attempt $attempt failed: $e',
+            tag: 'Bluetooth',
+          );
+          
+          if (attempt < maxRetries) {
+            // Wait before retry
+            await Future.delayed(Duration(milliseconds: 500 * attempt));
+          } else {
+            AppLogger.instance.error(
+              'Failed to send message after $maxRetries attempts',
+              tag: 'Bluetooth',
+              error: e,
+            );
+            return false;
+          }
+        }
+      }
       
-      // Write to characteristic
-      await writeChar.write(bytes, withoutResponse: false);
-      print('Message sent to ${device.name}: $message');
-      
-      return true;
+      return false;
     } catch (e) {
-      print('Error sending message: $e');
+      AppLogger.instance.error(
+        'Error sending message to ${device.name}',
+        tag: 'Bluetooth',
+        error: e,
+      );
       return false;
     }
   }

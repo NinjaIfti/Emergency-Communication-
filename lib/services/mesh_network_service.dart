@@ -281,8 +281,14 @@ class MeshNetworkService {
   // Send message with routing (either direct or multi-hop)
   Future<bool> sendMessage(Message message) async {
     try {
-      // Store in database
-      await _messageDao.insertMessage(message);
+      // CRITICAL: Store in database FIRST to prevent data loss
+      // This ensures message is persisted even if sending fails
+      try {
+        await _messageDao.insertMessage(message);
+      } catch (dbError) {
+        print('CRITICAL: Failed to save message to database: $dbError');
+        // Log but continue - try to send anyway
+      }
 
       // Check if destination is directly connected
       final connectedDevices = await _bluetoothService.getConnectedDevices();
